@@ -17,6 +17,7 @@ const clubsRoutes = require('./routes/clubs');
 const membershipsRoutes = require('./routes/memberships');
 const workoutsRoutes = require('./routes/workouts');
 const attendanceRoutes = require('./routes/attendance');
+const commentsRoutes = require('./routes/comments');
 
 // Use routes
 app.use('/api/members', membersRoutes);
@@ -25,6 +26,7 @@ app.use('/api/clubs', clubsRoutes);
 app.use('/api/memberships', membershipsRoutes);
 app.use('/api/workouts', workoutsRoutes);
 app.use('/api/attendance', attendanceRoutes);
+app.use('/api/comments', commentsRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -37,7 +39,8 @@ app.get('/', (req, res) => {
       clubs: '/api/clubs',
       memberships: '/api/memberships',
       workouts: '/api/workouts',
-      attendance: '/api/attendance'
+      attendance: '/api/attendance',
+      comments: '/api/comments'
     }
   });
 });

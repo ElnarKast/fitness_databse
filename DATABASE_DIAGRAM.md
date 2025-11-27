@@ -178,6 +178,26 @@
 - **memberships.status**: 'Active', 'Expired', 'Suspended'
 - **workout_types.difficulty_level**: 'Beginner', 'Intermediate', 'Advanced'
 - **attendance.status**: 'Present', 'Absent', 'Cancelled'
+- **member_comments.comment_type**: 'Complaint', 'Damage', 'Positive', 'Warning', 'Other'
+
+## Database Triggers
+
+### Auto-Calculate End Time
+**Trigger:** `before_workout_schedule_insert`
+- Fires BEFORE INSERT on `workout_schedule`
+- Calculates `end_time` automatically by adding `duration_minutes` from `workout_types` to `start_time`
+- If `available_spots` is not provided, uses `max_participants` from `workout_types`
+
+### Auto-Decrease Available Spots
+**Trigger:** `after_attendance_insert`
+- Fires AFTER INSERT on `attendance`
+- Automatically decreases `available_spots` in `workout_schedule` by 1
+
+### Auto-Restore Spots and Record Cancellation
+**Trigger:** `before_attendance_delete`
+- Fires BEFORE DELETE on `attendance`
+- Records cancellation in `booking_cancellations` table with original booking date
+- Automatically increases `available_spots` in `workout_schedule` by 1
 
 ## Business Logic
 
@@ -185,18 +205,43 @@
 When a **member** is deleted:
 - All their memberships are deleted
 - All their attendance records are deleted
+- All their booking cancellations are deleted
+- All comments about them are deleted
 
 When a **club** is deleted:
 - All memberships at that club are deleted
 - All scheduled workouts at that club are deleted
 - Trainers at that club have their club_id set to NULL
 
+When a **trainer** is deleted:
+- All comments made by that trainer are deleted
+
 When a **workout schedule** is deleted:
 - All attendance records for that workout are deleted
+- All booking cancellations for that workout are deleted
 
 ### Set NULL
 When a **club** is deleted:
 - Trainers assigned to that club have their club_id set to NULL (they still exist but are unassigned)
+
+## New Tables
+
+### BOOKING_CANCELLATIONS
+Tracks when members cancel their workout bookings:
+- `cancellation_id` (PK) - Unique identifier
+- `schedule_id` (FK) - Reference to workout_schedule
+- `member_id` (FK) - Reference to member who cancelled
+- `original_booking_date` - When the original booking was made
+- `cancellation_date` - When the cancellation occurred
+
+### MEMBER_COMMENTS
+Stores employee (trainer) comments about members:
+- `comment_id` (PK) - Unique identifier
+- `member_id` (FK) - Reference to member
+- `trainer_id` (FK) - Reference to trainer who made the comment
+- `comment_text` - The comment content
+- `comment_type` - Category: Complaint, Damage, Positive, Warning, Other
+- `created_at` - When the comment was created
 
 ## Data Flow Examples
 
@@ -210,7 +255,14 @@ When a **club** is deleted:
 ```
 1. Check WORKOUT_SCHEDULE for available spots
 2. Create record in ATTENDANCE (linking member to scheduled workout)
-3. Decrement available_spots in WORKOUT_SCHEDULE
+3. [TRIGGER] Decrement available_spots in WORKOUT_SCHEDULE automatically
+```
+
+### Cancelling a Booking Flow
+```
+1. Delete record from ATTENDANCE
+2. [TRIGGER] Record cancellation in BOOKING_CANCELLATIONS automatically
+3. [TRIGGER] Increment available_spots in WORKOUT_SCHEDULE automatically
 ```
 
 ### Scheduling a Class Flow
@@ -218,7 +270,15 @@ When a **club** is deleted:
 1. Select WORKOUT_TYPE (existing or create new)
 2. Select TRAINER
 3. Select CLUB
-4. Create record in WORKOUT_SCHEDULE
+4. Create record in WORKOUT_SCHEDULE (only start_time needed)
+5. [TRIGGER] end_time calculated automatically from workout_type duration
+```
+
+### Adding Employee Comment Flow
+```
+1. Select MEMBER
+2. Select TRAINER (who is making the comment)
+3. Create record in MEMBER_COMMENTS with type and text
 ```
 
 ## Indexes (Recommended for Performance)
@@ -233,10 +293,15 @@ CREATE INDEX idx_schedule_club ON workout_schedule(club_id);
 CREATE INDEX idx_schedule_type ON workout_schedule(workout_type_id);
 CREATE INDEX idx_attendance_schedule ON attendance(schedule_id);
 CREATE INDEX idx_attendance_member ON attendance(member_id);
+CREATE INDEX idx_cancellations_schedule ON booking_cancellations(schedule_id);
+CREATE INDEX idx_cancellations_member ON booking_cancellations(member_id);
+CREATE INDEX idx_comments_member ON member_comments(member_id);
+CREATE INDEX idx_comments_trainer ON member_comments(trainer_id);
 
 -- Search/filter indexes
 CREATE INDEX idx_members_email ON members(email);
 CREATE INDEX idx_trainers_email ON trainers(email);
 CREATE INDEX idx_schedule_date ON workout_schedule(schedule_date);
 CREATE INDEX idx_memberships_status ON memberships(status);
+CREATE INDEX idx_comments_type ON member_comments(comment_type);
 ```

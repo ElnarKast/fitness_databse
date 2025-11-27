@@ -1,7 +1,14 @@
 -- Fitness Club Database Schema
 -- This database manages fitness clubs, members, trainers, workouts, and memberships
 
+-- Drop triggers if they exist (for clean setup)
+DROP TRIGGER IF EXISTS before_workout_schedule_insert;
+DROP TRIGGER IF EXISTS after_attendance_insert;
+DROP TRIGGER IF EXISTS after_attendance_delete;
+
 -- Drop tables if they exist (for clean setup)
+DROP TABLE IF EXISTS member_comments;
+DROP TABLE IF EXISTS booking_cancellations;
 DROP TABLE IF EXISTS attendance;
 DROP TABLE IF EXISTS workout_schedule;
 DROP TABLE IF EXISTS memberships;
@@ -113,6 +120,84 @@ CREATE TABLE attendance (
     FOREIGN KEY (member_id) REFERENCES members(member_id) ON DELETE CASCADE
 );
 
+-- Table: booking_cancellations
+-- Tracks booking history when someone cancels their attendance
+CREATE TABLE booking_cancellations (
+    cancellation_id INT PRIMARY KEY AUTO_INCREMENT,
+    schedule_id INT NOT NULL,
+    member_id INT NOT NULL,
+    original_booking_date TIMESTAMP NOT NULL,
+    cancellation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (schedule_id) REFERENCES workout_schedule(schedule_id) ON DELETE CASCADE,
+    FOREIGN KEY (member_id) REFERENCES members(member_id) ON DELETE CASCADE
+);
+
+-- Table: member_comments
+-- Stores employee comments about members (complaints, issues, etc.)
+CREATE TABLE member_comments (
+    comment_id INT PRIMARY KEY AUTO_INCREMENT,
+    member_id INT NOT NULL,
+    trainer_id INT NOT NULL,
+    comment_text TEXT NOT NULL,
+    comment_type ENUM('Complaint', 'Damage', 'Positive', 'Warning', 'Other') NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (member_id) REFERENCES members(member_id) ON DELETE CASCADE,
+    FOREIGN KEY (trainer_id) REFERENCES trainers(trainer_id) ON DELETE CASCADE
+);
+
+-- Trigger: Auto-calculate end_time based on start_time and workout_type duration
+DELIMITER //
+CREATE TRIGGER before_workout_schedule_insert
+BEFORE INSERT ON workout_schedule
+FOR EACH ROW
+BEGIN
+    DECLARE duration INT DEFAULT 60;
+    DECLARE max_spots INT DEFAULT 20;
+    
+    -- Get duration from workout_types (with default fallback)
+    SELECT duration_minutes, max_participants INTO duration, max_spots
+    FROM workout_types
+    WHERE workout_type_id = NEW.workout_type_id;
+    
+    -- Calculate end_time by adding duration to start_time
+    SET NEW.end_time = ADDTIME(NEW.start_time, SEC_TO_TIME(duration * 60));
+    
+    -- If available_spots is not provided, use max_participants from workout_types
+    IF NEW.available_spots IS NULL THEN
+        SET NEW.available_spots = max_spots;
+    END IF;
+END//
+DELIMITER ;
+
+-- Trigger: Decrease available_spots when a participant is added
+DELIMITER //
+CREATE TRIGGER after_attendance_insert
+AFTER INSERT ON attendance
+FOR EACH ROW
+BEGIN
+    UPDATE workout_schedule
+    SET available_spots = available_spots - 1
+    WHERE schedule_id = NEW.schedule_id;
+END//
+DELIMITER ;
+
+-- Trigger: Increase available_spots and record cancellation when attendance is deleted
+DELIMITER //
+CREATE TRIGGER before_attendance_delete
+BEFORE DELETE ON attendance
+FOR EACH ROW
+BEGIN
+    -- Record the cancellation
+    INSERT INTO booking_cancellations (schedule_id, member_id, original_booking_date)
+    VALUES (OLD.schedule_id, OLD.member_id, OLD.attendance_date);
+    
+    -- Restore the available spot
+    UPDATE workout_schedule
+    SET available_spots = available_spots + 1
+    WHERE schedule_id = OLD.schedule_id;
+END//
+DELIMITER ;
+
 -- Insert sample data for testing
 
 -- Sample clubs
@@ -153,16 +238,19 @@ INSERT INTO workout_types (workout_name, description, duration_minutes, difficul
 ('CrossFit WOD', 'Workout of the Day - varied functional fitness', 60, 'Advanced', 15),
 ('Pilates Core', 'Core strengthening and flexibility training', 50, 'Beginner', 12);
 
--- Sample workout schedule
+-- Sample workout schedule (end_time is auto-calculated by trigger based on workout_type duration)
+-- Note: end_time is set to a placeholder value here, but will be overwritten by the trigger
 INSERT INTO workout_schedule (workout_type_id, trainer_id, club_id, schedule_date, start_time, end_time, available_spots) VALUES
-(1, 1, 1, '2024-11-15', '07:00:00', '07:45:00', 15),
-(2, 2, 1, '2024-11-15', '09:00:00', '10:00:00', 10),
-(3, 3, 2, '2024-11-15', '18:00:00', '19:30:00', 8),
-(4, 1, 1, '2024-11-16', '06:30:00', '07:15:00', 20),
-(5, 4, 3, '2024-11-16', '17:00:00', '18:00:00', 12),
-(6, 2, 1, '2024-11-17', '10:00:00', '10:50:00', 10);
+(1, 1, 1, '2024-11-15', '07:00:00', '00:00:00', 15),
+(2, 2, 1, '2024-11-15', '09:00:00', '00:00:00', 10),
+(3, 3, 2, '2024-11-15', '18:00:00', '00:00:00', 8),
+(4, 1, 1, '2024-11-16', '06:30:00', '00:00:00', 20),
+(5, 4, 3, '2024-11-16', '17:00:00', '00:00:00', 12),
+(6, 2, 1, '2024-11-17', '10:00:00', '00:00:00', 10);
 
--- Sample attendance records
+-- Sample attendance records (spots will be automatically decremented by trigger)
+-- Note: We need to add available spots first before inserting attendance to simulate proper flow
+-- The trigger will automatically decrement available_spots for each attendance record
 INSERT INTO attendance (schedule_id, member_id, status) VALUES
 (1, 1, 'Present'),
 (1, 2, 'Present'),
@@ -173,3 +261,9 @@ INSERT INTO attendance (schedule_id, member_id, status) VALUES
 (3, 5, 'Absent'),
 (4, 2, 'Present'),
 (5, 4, 'Present');
+
+-- Sample member comments
+INSERT INTO member_comments (member_id, trainer_id, comment_text, comment_type) VALUES
+(1, 1, 'Great attitude and always punctual', 'Positive'),
+(3, 2, 'Forgot to return equipment after workout', 'Warning'),
+(5, 3, 'Reported issue with locker door, needs maintenance', 'Complaint');

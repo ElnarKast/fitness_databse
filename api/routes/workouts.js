@@ -131,18 +131,27 @@ router.post('/types', async (req, res) => {
 // POST create workout schedule
 router.post('/schedule', async (req, res) => {
   try {
-    const { workout_type_id, trainer_id, club_id, schedule_date, start_time, end_time, available_spots } = req.body;
+    const { workout_type_id, trainer_id, club_id, schedule_date, start_time, available_spots } = req.body;
     
+    // end_time is auto-calculated by database trigger based on workout_type duration
+    // available_spots is also auto-set if not provided
+    // Using NULL for end_time as a placeholder - trigger will calculate actual value
     const [result] = await db.query(
       `INSERT INTO workout_schedule (workout_type_id, trainer_id, club_id, schedule_date, start_time, end_time, available_spots)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [workout_type_id, trainer_id, club_id, schedule_date, start_time, end_time, available_spots]
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+      [workout_type_id, trainer_id, club_id, schedule_date, start_time, available_spots || null]
+    );
+    
+    // Get the created schedule with calculated end_time
+    const [newSchedule] = await db.query(
+      'SELECT * FROM workout_schedule WHERE schedule_id = ?',
+      [result.insertId]
     );
     
     res.status(201).json({
       success: true,
       message: 'Workout schedule created successfully',
-      data: { schedule_id: result.insertId }
+      data: newSchedule[0]
     });
   } catch (error) {
     res.status(500).json({
