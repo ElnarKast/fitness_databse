@@ -151,10 +151,11 @@ CREATE TRIGGER before_workout_schedule_insert
 BEFORE INSERT ON workout_schedule
 FOR EACH ROW
 BEGIN
-    DECLARE duration INT;
+    DECLARE duration INT DEFAULT 60;
+    DECLARE max_spots INT DEFAULT 20;
     
-    -- Get duration from workout_types
-    SELECT duration_minutes INTO duration
+    -- Get duration from workout_types (with default fallback)
+    SELECT duration_minutes, max_participants INTO duration, max_spots
     FROM workout_types
     WHERE workout_type_id = NEW.workout_type_id;
     
@@ -163,9 +164,7 @@ BEGIN
     
     -- If available_spots is not provided, use max_participants from workout_types
     IF NEW.available_spots IS NULL THEN
-        SELECT max_participants INTO NEW.available_spots
-        FROM workout_types
-        WHERE workout_type_id = NEW.workout_type_id;
+        SET NEW.available_spots = max_spots;
     END IF;
 END//
 DELIMITER ;
@@ -240,14 +239,14 @@ INSERT INTO workout_types (workout_name, description, duration_minutes, difficul
 ('Pilates Core', 'Core strengthening and flexibility training', 50, 'Beginner', 12);
 
 -- Sample workout schedule (end_time is auto-calculated by trigger based on workout_type duration)
--- Note: end_time column is included for backward compatibility but trigger will override with calculated value
+-- Note: end_time is set to a placeholder value here, but will be overwritten by the trigger
 INSERT INTO workout_schedule (workout_type_id, trainer_id, club_id, schedule_date, start_time, end_time, available_spots) VALUES
-(1, 1, 1, '2024-11-15', '07:00:00', '07:00:00', 15),
-(2, 2, 1, '2024-11-15', '09:00:00', '09:00:00', 10),
-(3, 3, 2, '2024-11-15', '18:00:00', '18:00:00', 8),
-(4, 1, 1, '2024-11-16', '06:30:00', '06:30:00', 20),
-(5, 4, 3, '2024-11-16', '17:00:00', '17:00:00', 12),
-(6, 2, 1, '2024-11-17', '10:00:00', '10:00:00', 10);
+(1, 1, 1, '2024-11-15', '07:00:00', '00:00:00', 15),
+(2, 2, 1, '2024-11-15', '09:00:00', '00:00:00', 10),
+(3, 3, 2, '2024-11-15', '18:00:00', '00:00:00', 8),
+(4, 1, 1, '2024-11-16', '06:30:00', '00:00:00', 20),
+(5, 4, 3, '2024-11-16', '17:00:00', '00:00:00', 12),
+(6, 2, 1, '2024-11-17', '10:00:00', '00:00:00', 10);
 
 -- Sample attendance records (spots will be automatically decremented by trigger)
 -- Note: We need to add available spots first before inserting attendance to simulate proper flow

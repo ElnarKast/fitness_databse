@@ -135,9 +135,10 @@ router.post('/schedule', async (req, res) => {
     
     // end_time is auto-calculated by database trigger based on workout_type duration
     // available_spots is also auto-set if not provided
+    // Using NULL for end_time as a placeholder - trigger will calculate actual value
     const [result] = await db.query(
       `INSERT INTO workout_schedule (workout_type_id, trainer_id, club_id, schedule_date, start_time, end_time, available_spots)
-       VALUES (?, ?, ?, ?, ?, '00:00:00', ?)`,
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
       [workout_type_id, trainer_id, club_id, schedule_date, start_time, available_spots || null]
     );
     
