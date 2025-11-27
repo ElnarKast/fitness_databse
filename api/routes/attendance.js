@@ -92,17 +92,11 @@ router.post('/', async (req, res) => {
       });
     }
     
-    // Create attendance record
+    // Create attendance record (trigger will automatically decrease available_spots)
     const [result] = await db.query(
       `INSERT INTO attendance (schedule_id, member_id, status)
        VALUES (?, ?, ?)`,
       [schedule_id, member_id, status || 'Present']
-    );
-    
-    // Update available spots
-    await db.query(
-      'UPDATE workout_schedule SET available_spots = available_spots - 1 WHERE schedule_id = ?',
-      [schedule_id]
     );
     
     res.status(201).json({
@@ -150,11 +144,12 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE attendance record (cancel check-in)
+// Trigger will automatically restore available spot and record cancellation
 router.delete('/:id', async (req, res) => {
   try {
-    // Get schedule_id before deleting
+    // Verify attendance exists before deleting
     const [attendance] = await db.query(
-      'SELECT schedule_id FROM attendance WHERE attendance_id = ?',
+      'SELECT attendance_id FROM attendance WHERE attendance_id = ?',
       [req.params.id]
     );
     
@@ -165,20 +160,69 @@ router.delete('/:id', async (req, res) => {
       });
     }
     
-    const schedule_id = attendance[0].schedule_id;
-    
-    // Delete attendance
-    const [result] = await db.query('DELETE FROM attendance WHERE attendance_id = ?', [req.params.id]);
-    
-    // Restore available spot
-    await db.query(
-      'UPDATE workout_schedule SET available_spots = available_spots + 1 WHERE schedule_id = ?',
-      [schedule_id]
-    );
+    // Delete attendance (trigger will restore spot and record cancellation)
+    await db.query('DELETE FROM attendance WHERE attendance_id = ?', [req.params.id]);
     
     res.json({
       success: true,
-      message: 'Attendance record deleted successfully'
+      message: 'Attendance record deleted and cancellation recorded'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// GET all booking cancellations
+router.get('/cancellations', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT bc.*, 
+             m.first_name, m.last_name, m.email,
+             ws.schedule_date, ws.start_time,
+             wt.workout_name,
+             c.club_name
+      FROM booking_cancellations bc
+      JOIN members m ON bc.member_id = m.member_id
+      JOIN workout_schedule ws ON bc.schedule_id = ws.schedule_id
+      JOIN workout_types wt ON ws.workout_type_id = wt.workout_type_id
+      JOIN clubs c ON ws.club_id = c.club_id
+      ORDER BY bc.cancellation_date DESC
+    `);
+    res.json({
+      success: true,
+      count: rows.length,
+      data: rows
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// GET cancellations by member
+router.get('/cancellations/member/:member_id', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT bc.*, 
+             ws.schedule_date, ws.start_time,
+             wt.workout_name,
+             c.club_name
+      FROM booking_cancellations bc
+      JOIN workout_schedule ws ON bc.schedule_id = ws.schedule_id
+      JOIN workout_types wt ON ws.workout_type_id = wt.workout_type_id
+      JOIN clubs c ON ws.club_id = c.club_id
+      WHERE bc.member_id = ?
+      ORDER BY bc.cancellation_date DESC
+    `, [req.params.member_id]);
+    res.json({
+      success: true,
+      count: rows.length,
+      data: rows
     });
   } catch (error) {
     res.status(500).json({
